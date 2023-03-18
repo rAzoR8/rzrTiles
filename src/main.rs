@@ -9,7 +9,7 @@ fn main() -> eframe::Result<()> {
 
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(
-        "eframe template",
+        "rzrTiles by Fabian Wahlster",
         native_options,
         Box::new(|cc| Box::new(eframe_template::TemplateApp::new(cc))),
     )
