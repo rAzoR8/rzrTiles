@@ -97,13 +97,20 @@ impl eframe::App for TemplateApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             // The central panel the region left after adding TopPanel's and SidePanel's
 
-            ui.heading("eframe template");
-            ui.hyperlink("https://github.com/emilk/eframe_template");
-            ui.add(egui::github_link_file!(
-                "https://github.com/emilk/eframe_template/blob/master/",
-                "Source code."
-            ));
-            egui::warn_if_debug_build(ui);
+            let x = 255;
+            let y = 10;
+
+            TableBuilder::new(ui)
+            .columns(Column::auto().resizable(true), x)
+            .body(|mut body| {
+                for _ in 0..y{
+                    body.row(30.0, |mut row| {
+                        row.col(|ui| {
+                            ui.label("Hello");
+                        });
+                    });
+                }
+            });
         });
 
         if false {
