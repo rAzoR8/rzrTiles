@@ -1,23 +1,23 @@
 use egui_extras::{TableBuilder, Column};
+use egui::{RichText, Color32, Sense, Label, Button, Vec2};
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct TemplateApp {
-    // Example stuff:
-    label: String,
-
-    // this how you opt-out of serialization of a member
-    #[serde(skip)]
-    value: f32,
+    tile_data: Vec<u8>,
+    x: u32,
+    y: u32,
+    palette: [Color32; 4]
 }
 
 impl Default for TemplateApp {
     fn default() -> Self {
         Self {
-            // Example stuff:
-            label: "Hello rzrBoy!".to_owned(),
-            value: 2.7,
+            tile_data: vec![0; 8*8],//(0..8*8).collect(),
+            x: 8,
+            y: 8,
+            palette: [Color32::WHITE, Color32::LIGHT_GRAY, Color32::DARK_GRAY, Color32::BLACK]
         }
     }
 }
@@ -47,7 +47,7 @@ impl eframe::App for TemplateApp {
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let Self { label, value } = self;
+        let Self { tile_data, x, y, palette } = self;
 
         // Examples of how to create different panels and windows.
         // Pick whichever suits you.
@@ -68,15 +68,8 @@ impl eframe::App for TemplateApp {
 
         egui::SidePanel::left("side_panel").show(ctx, |ui| {
             ui.heading("Side Panel");
-
-            ui.horizontal(|ui| {
-                ui.label("Write something: ");
-                ui.text_edit_singleline(label);
-            });
-
-            ui.add(egui::Slider::new(value, 0.0..=10.0).text("value"));
-            if ui.button("Increment").clicked() {
-                *value += 1.0;
+            if ui.button("Reset").clicked() {
+                tile_data.fill(0);
             }
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
@@ -95,19 +88,29 @@ impl eframe::App for TemplateApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            // The central panel the region left after adding TopPanel's and SidePanel's
-
-            let x = 255;
-            let y = 10;
-
             TableBuilder::new(ui)
-            .columns(Column::auto().resizable(true), x)
+            .columns(Column::auto(), *x as usize)
+            .striped(false)
+            //.resizable(false)
             .body(|mut body| {
-                for _ in 0..y{
-                    body.row(30.0, |mut row| {
-                        row.col(|ui| {
-                            ui.label("Hello");
-                        });
+                body.ui_mut().spacing_mut().item_spacing = Vec2::new(1.0, 1.0);
+                for r in 0..*y{
+                    body.row( 12.0, |mut row| {
+                        for c in 0..*x {
+                            row.col(|ui| {
+                                let index = (r*(*y)+c) as usize;
+                                let i = tile_data[index] % (palette.len() as u8);
+                                let color = palette[i as usize];
+                                let text = RichText::new( i.to_string() ).background_color(color);
+                                //let text = i.to_string();
+                                //ui.visuals_mut().code_bg_color = color;
+                                //ui.visuals_mut().selection.bg_fill = color;
+                                if ui.add(Label::new(text).sense(Sense::click())).clicked() {
+                                    tile_data[index] = (i+1) % (palette.len() as u8);
+                                }
+                                //ui.shrink_width_to_current();
+                            });
+                        } 
                     });
                 }
             });
