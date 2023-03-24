@@ -6,8 +6,8 @@ use egui::{RichText, Color32, Sense, Label, Button, Vec2};
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct TemplateApp {
     tile_data: Vec<u8>,
-    x: u32,
-    y: u32,
+    width: u32,
+    height: u32,
     palette: [Color32; 4]
 }
 
@@ -15,8 +15,8 @@ impl Default for TemplateApp {
     fn default() -> Self {
         Self {
             tile_data: vec![0; 8*8],//(0..8*8).collect(),
-            x: 8,
-            y: 8,
+            width: 8,
+            height: 8,
             palette: [Color32::WHITE, Color32::LIGHT_GRAY, Color32::DARK_GRAY, Color32::BLACK]
         }
     }
@@ -30,12 +30,44 @@ impl TemplateApp {
 
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
-        if let Some(storage) = cc.storage {
-            return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
-        }
+        // if let Some(storage) = cc.storage {
+        //     return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
+        // }
 
         Default::default()
     }
+
+    pub fn get(&self, x: u32, y: u32) -> u8
+    {
+        let index = (y*self.width+x) as usize;
+        self.tile_data[index]
+    }
+    pub fn set(&mut self, x: u32, y: u32, val: u8)
+    {
+        let index = (y*self.width+x) as usize;
+        self.tile_data[index] = val;
+    }
+
+    pub fn export(&self) -> Vec<u8>
+    {
+        let mut tiles:Vec<u8> = Vec::with_capacity((self.height*self.width*2) as usize);
+        for y in 0..self.height {
+            for x in (0..self.width).step_by(8) {
+                let mut left: u8 = 0;
+                let mut right: u8 = 0;
+
+                for i in 0..8 {
+                    let cur = self.get(x+i, y);
+                    left |= (cur & 0b01) << (7-i);
+                    right |= ( ( cur & 0b10 ) >> 1 ) << (7-i);
+                }
+                tiles.push(left);
+                tiles.push(right);
+            }
+        }
+        tiles
+    }
+
 }
 
 impl eframe::App for TemplateApp {
@@ -47,12 +79,15 @@ impl eframe::App for TemplateApp {
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let Self { tile_data, x, y, palette } = self;
+        //let Self { tile_data, x, y, palette } = self;
 
-        // Examples of how to create different panels and windows.
-        // Pick whichever suits you.
-        // Tip: a good default choice is to just keep the `CentralPanel`.
-        // For inspiration and more examples, go to https://emilk.github.io/egui
+        let input = ctx.input(|i| {
+            if i.key_pressed(egui::Key::Num1) { return 0; }
+            if i.key_pressed(egui::Key::Num2) { return 1; }
+            if i.key_pressed(egui::Key::Num3) { return 2; }
+            if i.key_pressed(egui::Key::Num4) { return 3; }
+            255u8 // invalid
+        });
 
         #[cfg(not(target_arch = "wasm32"))] // no File->Quit on web pages!
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
@@ -67,52 +102,103 @@ impl eframe::App for TemplateApp {
         });
 
         egui::SidePanel::left("side_panel").show(ctx, |ui| {
-            ui.heading("Side Panel");
-            if ui.button("Reset").clicked() {
-                tile_data.fill(0);
+            ui.horizontal(|ui|{
+                ui.heading("rzrTiles");
+                if ui.button("Reset").clicked() {
+                    self.tile_data.fill(0);
+                }
+            });
+
+            ui.horizontal(|ui|{
+                for i in 0..self.palette.len() {
+                    let mut newcolor = self.palette[i];
+                    ui.label(i.to_string());
+                    ui.color_edit_button_srgba(&mut newcolor);            
+                    self.palette[i] = newcolor;
+                }
+            });
+
+            let mut width = self.width.clone() / 8;
+            ui.add(egui::Slider::new(&mut width, 1..=8).text(format!("Width ({w})", w=self.width)));
+            width *= 8;
+
+            let mut height = self.height.clone() / 8;
+            ui.add(egui::Slider::new(&mut height, 1..=8).text(format!("Height ({h})", h=self.height)));
+            height *= 8;
+
+            if width != self.width || height != self.height
+            {
+                let mut new_tiles = vec![0; (width*height) as usize];
+                let miny = std::cmp::min(self.height, height);
+                let minx = std::cmp::min(self.width, width);
+
+                for i in 0..miny {
+                    for j in 0..minx {
+                        let dst= (i*width + j) as usize;
+                        let src= (i*(self.width) + j) as usize;
+                        new_tiles[dst] = self.tile_data[src];
+                    }
+                }
+
+                self.tile_data = new_tiles;
+                self.width = width;
+                self.height = height;
             }
 
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.label("powered by ");
-                    ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-                    ui.label(" and ");
-                    ui.hyperlink_to(
-                        "eframe",
-                        "https://github.com/emilk/egui/tree/master/crates/eframe",
-                    );
-                    ui.label(".");
-                });
-            });
+            for y in 0..self.height {
+                for x in (0..self.width).step_by(8) {
+                    let mut left: u8 = 0;
+                    let mut right: u8 = 0;
+
+                    for i in 0..8 {
+                        let cur = self.get(x+i, y);
+                        left |= (cur & 0b01) << (7-i);
+                        right |= ( ( cur & 0b10 ) >> 1 ) << (7-i);
+                    }
+
+                    ui.horizontal(|ui| {
+                        ui.label(format!("{:02X} {:02X}", left, right));
+                    });                    
+                }
+            }
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            let cell_size: f32 = 20.0;
             TableBuilder::new(ui)
-            .columns(Column::auto(), *x as usize)
+            .columns(Column::auto(), self.width as usize)
             .striped(false)
-            //.resizable(false)
+            //.resizable(true)
+            .auto_shrink([false, false])
+            .max_scroll_height(1600.0)
             .body(|mut body| {
-                body.ui_mut().spacing_mut().item_spacing = Vec2::new(1.0, 1.0);
-                for r in 0..*y{
-                    body.row( 12.0, |mut row| {
-                        for c in 0..*x {
+                body.ui_mut().spacing_mut().item_spacing = Vec2::new(0.0, 0.0);
+                for r in 0..self.height{ // r = row
+                    body.row( cell_size, |mut row| {
+                        for c in 0..self.width { // c = column
                             row.col(|ui| {
-                                let index = (r*(*y)+c) as usize;
-                                let i = tile_data[index] % (palette.len() as u8);
-                                let color = palette[i as usize];
-                                let text = RichText::new( i.to_string() ).background_color(color);
+                                
+                                let index = (r*self.width+c) as usize;
+                                let i = self.tile_data[index] % (self.palette.len() as u8);
+                                let color = self.palette[i as usize];
+                                let text = RichText::new( i.to_string() + " " ).background_color(color).size(cell_size).monospace();
                                 //let text = i.to_string();
                                 //ui.visuals_mut().code_bg_color = color;
                                 //ui.visuals_mut().selection.bg_fill = color;
-                                if ui.add(Label::new(text).sense(Sense::click())).clicked() {
-                                    tile_data[index] = (i+1) % (palette.len() as u8);
+                                //ui.add_sized([20.0, 20.0]                              
+                                
+                                let sense = Sense::click().union(Sense::hover());
+                                let cell = ui.add( Label::new(text).wrap(false).sense(sense) );
+                                if cell.clicked() {
+                                    self.tile_data[index] = (i+1) % (self.palette.len() as u8);
+                                } else if cell.hovered() && input != 255u8{
+                                    self.tile_data[index] = input % (self.palette.len() as u8);
                                 }
-                                //ui.shrink_width_to_current();
                             });
                         } 
                     });
                 }
+                //body.ui_mut().shrink_width_to_current();
             });
         });
 
