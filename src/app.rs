@@ -1,6 +1,7 @@
 use egui_extras::{TableBuilder, Column};
 use egui::{RichText, Color32, Sense, Label, Button, Vec2};
-
+use std::fs::{File};
+use std::io::Write;
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
@@ -8,16 +9,18 @@ pub struct TemplateApp {
     tile_data: Vec<u8>,
     width: u32,
     height: u32,
-    palette: [Color32; 4]
+    palette: [Color32; 4],
+    picked_path: String,
 }
 
 impl Default for TemplateApp {
     fn default() -> Self {
         Self {
-            tile_data: vec![0; 8*8],//(0..8*8).collect(),
+            tile_data: vec![0; 8*8],
             width: 8,
             height: 8,
-            palette: [Color32::WHITE, Color32::LIGHT_GRAY, Color32::DARK_GRAY, Color32::BLACK]
+            palette: [Color32::WHITE, Color32::LIGHT_GRAY, Color32::DARK_GRAY, Color32::BLACK],
+            picked_path: String::from("tiles.tl")
         }
     }
 }
@@ -30,9 +33,9 @@ impl TemplateApp {
 
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
-        // if let Some(storage) = cc.storage {
-        //     return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
-        // }
+        if let Some(storage) = cc.storage {
+            return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
+        }
 
         Default::default()
     }
@@ -68,6 +71,13 @@ impl TemplateApp {
         tiles
     }
 
+}
+
+pub fn write(path: &String, data: &Vec<u8>)-> std::io::Result<()>
+{
+    let mut f = File::create(path)?;
+    f.write_all(&data)?;
+    Ok(())
 }
 
 impl eframe::App for TemplateApp {
@@ -106,6 +116,19 @@ impl eframe::App for TemplateApp {
                 ui.heading("rzrTiles");
                 if ui.button("Reset").clicked() {
                     self.tile_data.fill(0);
+                }
+            });
+
+            ui.horizontal(|ui|{
+                if ui.button("Open file…").clicked() {
+                    if let Some(path) = rfd::FileDialog::new().pick_file() {
+                        self.picked_path = path.display().to_string();
+                    }
+                }
+                if !self.picked_path.is_empty() {
+                    if ui.button("Save").clicked(){
+                       write(&self.picked_path, &self.tile_data);
+                    }
                 }
             });
 
