@@ -2,7 +2,7 @@ use egui_extras::{TableBuilder, Column};
 use egui::{RichText, Color32, Sense, Label, Vec2, Stroke};
 use std::fs::{File};
 use std::io::{BufWriter, Write, BufReader, Read};
-use std::u8;
+use std::{u8, cell};
 
 const TL_MAGIC: &'static [u8] = &[0x72,0x54, 0x69, 0x6c]; // rTil
 const TL_VERSION: &'static [u8] = &[0, 1];
@@ -19,6 +19,7 @@ pub struct TemplateApp {
     height: u32,
     palette: [Color32; 4],
     picked_path: String,
+    scale: f32
 }
 
 impl Default for TemplateApp {
@@ -28,7 +29,8 @@ impl Default for TemplateApp {
             width: 8,
             height: 8,
             palette: [Color32::WHITE, Color32::LIGHT_GRAY, Color32::DARK_GRAY, Color32::BLACK],
-            picked_path: String::from("tiles.tl")
+            picked_path: String::from("tiles.tl"),
+            scale: 1.0
         }
     }
 }
@@ -257,6 +259,8 @@ impl eframe::App for TemplateApp {
                 }
             });
 
+            ui.add(egui::Slider::new(&mut self.scale, 0.0..=10.0).text("Scale"));
+
             let mut width = self.width.clone() / 8;
             ui.add(egui::Slider::new(&mut width, 1..=8).text(format!("Width ({w})", w=self.width)));
             width *= 8;
@@ -336,7 +340,7 @@ impl eframe::App for TemplateApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            let cell_size: f32 = 20.0;
+            let cell_size: f32 = 20.0 * self.scale;
             TableBuilder::new(ui)
             .columns(Column::auto_with_initial_suggestion(cell_size), self.width as usize)
             .striped(false)
@@ -345,37 +349,34 @@ impl eframe::App for TemplateApp {
             .max_scroll_height(1600.0)
             .body(|mut body| {
                 body.ui_mut().spacing_mut().item_spacing = Vec2::new(0.0, 0.0);
-                for r in 0..self.height{ // r = row
-                    body.row( cell_size,   |mut row| {
-                        for c in 0..self.width { // c = column
-                            row.col(|ui| {
-                                
-                                let index = (r*self.width+c) as usize;
-                                let i = self.tile_data[index] % (self.palette.len() as u8);
-                                let bgcolor = self.palette[i as usize];
-                                let mut text = RichText::new( i.to_string() + " " ).background_color(Color32::TRANSPARENT).size(cell_size).monospace();  
-    
-                                let mut frame = egui::Frame::none();
-                                frame = frame.fill(bgcolor);
-                                
-                                if r % 8 == 0 ||c % 8 == 0{
-                                    text = text.color(Color32::DARK_BLUE);
-                                }
+                body.rows(cell_size, self.height as usize, |row_index, mut row|{
+                    let r = row_index as u32;
+                    for c in 0..self.width {
+                        row.col(|ui|{
+                            let index = (r*self.width+c) as usize;
+                            let i = self.tile_data[index] % (self.palette.len() as u8);
+                            let bgcolor = self.palette[i as usize];
+                            let mut text = RichText::new( i.to_string() + " " ).background_color(Color32::TRANSPARENT).size(cell_size).monospace();  
 
-                                frame.show(ui, |ui| {
-                                    let sense = Sense::click().union(Sense::hover());
-                                    let cell = ui.add( Label::new(text).wrap(false).sense(sense) );
-                                    if cell.clicked() {
-                                        self.tile_data[index] = (i+1) % (self.palette.len() as u8);
-                                    } else if cell.hovered() && input != 255u8{
-                                        self.tile_data[index] = input % (self.palette.len() as u8);
-                                    }
-                                });
+                            let mut frame = egui::Frame::none();
+                            frame = frame.fill(bgcolor);
+                            
+                            if r % 8 == 0 ||c % 8 == 0{
+                                text = text.color(Color32::DARK_BLUE);
+                            }
+
+                            frame.show(ui, |ui| {
+                                let sense = Sense::click().union(Sense::hover());
+                                let cell = ui.add( Label::new(text).wrap(false).sense(sense) );
+                                if cell.clicked() {
+                                    self.tile_data[index] = (i+1) % (self.palette.len() as u8);
+                                } else if cell.hovered() && input != 255u8{
+                                    self.tile_data[index] = input % (self.palette.len() as u8);
+                                }
                             });
-                        } 
-                    });
-                }
-                //body.ui_mut().shrink_width_to_current();
+                        });
+                    }
+                });
             });
         });
 
