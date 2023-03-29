@@ -1,13 +1,21 @@
 use egui_extras::{TableBuilder, Column};
-use egui::{RichText, Color32, Sense, Label, Button, Vec2};
+use egui::{RichText, Color32, Sense, Label, Vec2, Stroke};
 use std::fs::{File};
-use std::io::Write;
+use std::io::{BufWriter, Write, BufReader, Read};
+use std::u8;
+
+const TL_MAGIC: &'static [u8] = &[0x72,0x54, 0x69, 0x6c]; // rTil
+const TL_VERSION: &'static [u8] = &[0, 1];
+
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct TemplateApp {
+    #[serde(skip)]
     tile_data: Vec<u8>,
+    #[serde(skip)]
     width: u32,
+    #[serde(skip)]
     height: u32,
     palette: [Color32; 4],
     picked_path: String,
@@ -53,31 +61,114 @@ impl TemplateApp {
 
     pub fn export(&self) -> Vec<u8>
     {
-        let mut tiles:Vec<u8> = Vec::with_capacity((self.height*self.width*2) as usize);
-        for y in 0..self.height {
-            for x in (0..self.width).step_by(8) {
+        pixels_to_gb_tiles(&self.tile_data, self.width, self.height)
+    }
+
+    /// w and h number of tiles
+    pub fn import(&mut self, data: &[u8], w: u32, h: u32)
+    {
+        self.width = w*8;
+        self.height = h*8;
+        self.tile_data = gb_tiles_to_pixels(data, w, h);
+    }
+
+    pub fn save_to_disk(&self, path: impl Into<String>)
+    {
+        let mut f = BufWriter::new( File::create(path.into()).expect("Failed to create file") );
+        f.write(TL_MAGIC);
+        f.write(TL_VERSION);
+        let dims =[(self.width / 8) as u8, (self.height / 8) as u8];
+        f.write(&dims);
+        let data = pixels_to_gb_tiles(&self.tile_data, self.width, self.height);
+        f.write(&data);
+    }
+
+    pub fn load_from_disk(&mut self, path: impl Into<String>)
+    {
+        let mut f = BufReader::new( File::open(path.into()).expect("Failed to open file") );
+
+        let mut magic: [u8;4] = [0,0,0,0];
+        let mut version: [u8;2] = [0,1];
+        let mut dims: [u8;2] = [0,0];
+
+        f.read_exact(&mut magic);
+        f.read_exact(&mut version);
+        f.read_exact(&mut dims);
+
+        if magic == TL_MAGIC && version == TL_VERSION
+        {
+            let w = dims[0];
+            let h = dims[1];
+            let mut tiles: Vec<u8> = Vec::new();
+            tiles.resize((w*h*16) as usize, 0); // 16 byte per tile
+            f.read_exact(&mut tiles);
+
+            self.tile_data = gb_tiles_to_pixels(&tiles, w as u32, h as u32);
+            self.width = (w * 8) as u32;
+            self.height = (h * 8) as u32;
+        }      
+    }
+
+}
+
+/// w and h number of tiles
+pub fn gb_tiles_to_pixels(data: &[u8], w: u32, h: u32) -> Vec<u8>
+{
+    assert_eq!(data.len(), (w*h*16) as usize); // 2 bytes per row, 8 rows per tile
+
+    let height = h*8;
+    let width = w*8;
+    let mut new_tiles: Vec<u8> = Vec::new();
+    new_tiles.resize((height*width) as usize, 0);
+
+    let mut trow = 0;;
+
+    for y in 0..h {
+        for x in 0..w {
+            for j in 0..8 { // y_tile
+                let left = data[trow];trow += 1;
+                let right = data[trow];trow += 1;
+                for i in 0..8 { // x_tile
+                    let color = ((left >> (7-i)) & 0b1) | ((right >> (7-i)) & 0b1) << 1;
+                    let pixel = (y*8+j)*(w*8)+(x*8)+i;
+                    new_tiles[pixel as usize] = color;
+                }
+            }
+        }
+    }
+
+    assert_eq!(new_tiles.len(), (w*h*64) as usize); // 64 pixel per tile (8x8)
+
+    new_tiles
+}
+
+// w and h in number of pixels
+pub fn pixels_to_gb_tiles(data: &[u8], w: u32, h: u32) -> Vec<u8>
+{
+    assert_eq!(data.len(), (w*h) as usize);
+
+    let mut tiles: Vec<u8> = Vec::with_capacity((w*h/4) as usize);
+    for y_tile in 0..h/8 {
+        for x_tile in 0..w/8 {
+            for y in 0..8 {
                 let mut left: u8 = 0;
                 let mut right: u8 = 0;
-
-                for i in 0..8 {
-                    let cur = self.get(x+i, y);
-                    left |= (cur & 0b01) << (7-i);
-                    right |= ( ( cur & 0b10 ) >> 1 ) << (7-i);
+    
+                for x in 0..8 {
+                    let tile = (y_tile*w*8)+y*w+x_tile*8+x;
+                    let cur = data[ tile as usize];
+                    left |= (cur & 0b01) << (7-x);
+                    right |= ( ( cur & 0b10 ) >> 1 ) << (7-x);
                 }
                 tiles.push(left);
                 tiles.push(right);
             }
         }
-        tiles
     }
 
-}
+    assert_eq!(tiles.len(), (w*h/4) as usize);
 
-pub fn write(path: &String, data: &Vec<u8>)-> std::io::Result<()>
-{
-    let mut f = File::create(path)?;
-    f.write_all(&data)?;
-    Ok(())
+    tiles
 }
 
 impl eframe::App for TemplateApp {
@@ -89,8 +180,6 @@ impl eframe::App for TemplateApp {
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        //let Self { tile_data, x, y, palette } = self;
-
         let input = ctx.input(|i| {
             if i.key_pressed(egui::Key::Num1) { return 0; }
             if i.key_pressed(egui::Key::Num2) { return 1; }
@@ -111,28 +200,55 @@ impl eframe::App for TemplateApp {
             });
         });
 
-        egui::SidePanel::left("side_panel").show(ctx, |ui| {
+        egui::SidePanel::left("side_panel").min_width(364.0)
+        .show(ctx, |ui| {
             ui.horizontal(|ui|{
-                ui.heading("rzrTiles");
+                ui.heading("rzrTile:");
+                ui.label(&self.picked_path);
+            });
+
+            ui.horizontal(|ui|{
+                if ui.button("Load").clicked() {
+                    if let Some(path) = rfd::FileDialog::new().pick_file() {
+                        self.picked_path = path.display().to_string();
+                        self.load_from_disk(&self.picked_path.clone())
+                    }
+                }
+
+                if ui.button("Save").clicked(){
+                    if self.picked_path.is_empty() {
+                        if let Some(path) = rfd::FileDialog::new().save_file() {
+                            self.picked_path = path.display().to_string();
+                        }
+                    }
+
+                    if !self.picked_path.is_empty() {
+                        self.save_to_disk(&self.picked_path);
+                    }
+                }             
+
+                if ui.button("Save As").clicked(){
+                    if let Some(path) = rfd::FileDialog::new().save_file() {
+                        self.picked_path = path.display().to_string();
+                        if !self.picked_path.is_empty() {
+                            self.save_to_disk(&self.picked_path);
+                        }
+                    }
+                }
+
+                if ui.button("Roundtrip").clicked()
+                {
+                    self.save_to_disk("roundtrip.tl");
+                    self.load_from_disk("roundtrip.tl");
+                }
+
                 if ui.button("Reset").clicked() {
                     self.tile_data.fill(0);
                 }
             });
 
             ui.horizontal(|ui|{
-                if ui.button("Open file…").clicked() {
-                    if let Some(path) = rfd::FileDialog::new().pick_file() {
-                        self.picked_path = path.display().to_string();
-                    }
-                }
-                if !self.picked_path.is_empty() {
-                    if ui.button("Save").clicked(){
-                       write(&self.picked_path, &self.tile_data);
-                    }
-                }
-            });
-
-            ui.horizontal(|ui|{
+                ui.label("BG palette:");
                 for i in 0..self.palette.len() {
                     let mut newcolor = self.palette[i];
                     ui.label(i.to_string());
@@ -149,6 +265,7 @@ impl eframe::App for TemplateApp {
             ui.add(egui::Slider::new(&mut height, 1..=8).text(format!("Height ({h})", h=self.height)));
             height *= 8;
 
+            // rescale
             if width != self.width || height != self.height
             {
                 let mut new_tiles = vec![0; (width*height) as usize];
@@ -168,6 +285,8 @@ impl eframe::App for TemplateApp {
                 self.height = height;
             }
 
+            // print hex
+            let mut hex_str = String::new();
             for y in 0..self.height {
                 for x in (0..self.width).step_by(8) {
                     let mut left: u8 = 0;
@@ -179,9 +298,39 @@ impl eframe::App for TemplateApp {
                         right |= ( ( cur & 0b10 ) >> 1 ) << (7-i);
                     }
 
-                    ui.horizontal(|ui| {
-                        ui.label(format!("{:02X} {:02X}", left, right));
-                    });                    
+                    hex_str.push_str(&format!("{:02X} {:02X}", left, right));               
+                    if x+8 < self.width{
+                        hex_str.push(' ');
+                    }
+                }
+                hex_str.push('\n');
+            }
+
+            let hex_edit = egui::TextEdit::multiline(&mut hex_str).code_editor().desired_width(ui.available_width());
+            if ui.add(hex_edit).changed(){
+                let mut y = 0;
+                for row in hex_str.split('\n'){
+                    let mut x_byte = 0;
+                    let mut left: u8 = 0;
+                    let mut right: u8 = 0;
+
+                    for byte in row.split(' ') {
+                        if let Ok(value) = u8::from_str_radix(byte, 16){
+                            if x_byte & 1 == 1 {// odd -> right
+                                right = value;
+                                let x: u32 = x_byte/2;
+                                for i in 0..8 { // x_tile
+                                    let color = ((left >> (7-i)) & 0b1) | ((right >> (7-i)) & 0b1) << 1;
+                                    let pixel = y*self.width + x*8 + i;
+                                    self.tile_data[pixel as usize] = color;
+                                }
+                            } else {
+                                left = value;
+                            }
+                        }
+                        x_byte += 1;
+                    }
+                    y += 1;
                 }
             }
         });
@@ -189,7 +338,7 @@ impl eframe::App for TemplateApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             let cell_size: f32 = 20.0;
             TableBuilder::new(ui)
-            .columns(Column::auto(), self.width as usize)
+            .columns(Column::auto_with_initial_suggestion(cell_size), self.width as usize)
             .striped(false)
             //.resizable(true)
             .auto_shrink([false, false])
@@ -197,26 +346,31 @@ impl eframe::App for TemplateApp {
             .body(|mut body| {
                 body.ui_mut().spacing_mut().item_spacing = Vec2::new(0.0, 0.0);
                 for r in 0..self.height{ // r = row
-                    body.row( cell_size, |mut row| {
+                    body.row( cell_size,   |mut row| {
                         for c in 0..self.width { // c = column
                             row.col(|ui| {
                                 
                                 let index = (r*self.width+c) as usize;
                                 let i = self.tile_data[index] % (self.palette.len() as u8);
-                                let color = self.palette[i as usize];
-                                let text = RichText::new( i.to_string() + " " ).background_color(color).size(cell_size).monospace();
-                                //let text = i.to_string();
-                                //ui.visuals_mut().code_bg_color = color;
-                                //ui.visuals_mut().selection.bg_fill = color;
-                                //ui.add_sized([20.0, 20.0]                              
+                                let bgcolor = self.palette[i as usize];
+                                let mut text = RichText::new( i.to_string() + " " ).background_color(Color32::TRANSPARENT).size(cell_size).monospace();  
+    
+                                let mut frame = egui::Frame::none();
+                                frame = frame.fill(bgcolor);
                                 
-                                let sense = Sense::click().union(Sense::hover());
-                                let cell = ui.add( Label::new(text).wrap(false).sense(sense) );
-                                if cell.clicked() {
-                                    self.tile_data[index] = (i+1) % (self.palette.len() as u8);
-                                } else if cell.hovered() && input != 255u8{
-                                    self.tile_data[index] = input % (self.palette.len() as u8);
+                                if r % 8 == 0 ||c % 8 == 0{
+                                    text = text.color(Color32::DARK_BLUE);
                                 }
+
+                                frame.show(ui, |ui| {
+                                    let sense = Sense::click().union(Sense::hover());
+                                    let cell = ui.add( Label::new(text).wrap(false).sense(sense) );
+                                    if cell.clicked() {
+                                        self.tile_data[index] = (i+1) % (self.palette.len() as u8);
+                                    } else if cell.hovered() && input != 255u8{
+                                        self.tile_data[index] = input % (self.palette.len() as u8);
+                                    }
+                                });
                             });
                         } 
                     });
