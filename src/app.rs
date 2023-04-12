@@ -90,7 +90,18 @@ impl TemplateApp {
 
     pub fn save_to_disk(&self, path: impl Into<String>)
     {
-        let mut f = BufWriter::new( File::create(path.into()).expect("Failed to create file") );
+        let file = match File::create(path.into())
+        {
+            Ok(file) => file,
+            Err(err) => 
+            {
+                // TODO log error
+                println!("save_to_disk: {}", err);
+                return;
+            }
+        };
+
+        let mut f = BufWriter::new( file );
         f.write(TL_MAGIC);
         f.write(TL_VERSION);
         f.write(&[self.mode as u8]);
