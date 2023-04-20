@@ -113,7 +113,18 @@ impl TemplateApp {
 
     pub fn load_from_disk(&mut self, path: impl Into<String>)
     {
-        let mut f = BufReader::new( File::open(path.into()).expect("Failed to open file") );
+        let file = match File::open(path.into())
+        {
+            Ok(file) => file,
+            Err(err) => 
+            {
+                // TODO log error
+                println!("load_from_disk: {}", err);
+                return;
+            }
+        };
+
+        let mut f = BufReader::new( file );
 
         let mut magic: [u8;4] = [0,0,0,0];
         let mut version: [u8;1] = [0];
