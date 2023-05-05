@@ -138,8 +138,8 @@ impl TemplateApp {
 
         if magic == TL_MAGIC && version == TL_VERSION
         {
-            let w = dims[0];
-            let h = dims[1];
+            let w:u32 = dims[0] as u32;
+            let h:u32 = dims[1] as u32;
 
             if mode[0] == (TileMode::Y16 as u8) {
                 self.mode = TileMode::Y16;
@@ -147,13 +147,13 @@ impl TemplateApp {
                 self.mode = TileMode::Y8;
             }
 
-            let bytes_per_tile = self.mode as u8 * 2;
+            let bytes_per_tile = self.mode as u32 * 2;
             let mut tiles: Vec<u8> = vec![0; (w*h*bytes_per_tile) as usize ];
             f.read_exact(&mut tiles);
 
             self.pixels = gb_tiles_to_pixels(&tiles, w as u32, h as u32, self.mode);
-            self.width = (w * 8) as u32;
-            self.height = (h * 8) as u32;
+            self.width = w * 8;
+            self.height = h * 8;
         }      
     }
 
