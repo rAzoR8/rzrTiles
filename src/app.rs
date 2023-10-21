@@ -3,6 +3,9 @@ use egui::{RichText, Color32, Sense, Label, Vec2, Stroke};
 use std::fs::{File};
 use std::io::{BufWriter, Write, BufReader, Read};
 use std::{u8};
+use image;
+use image::{GenericImageView, DynamicImage};
+use image::imageops::FilterType;
 
 const TL_MAGIC: &'static [u8] = &[0x72,0x54, 0x69, 0x6c]; // rTil
 const TL_VERSION: &'static [u8] = &[1];
@@ -31,7 +34,11 @@ pub struct TemplateApp {
     palette: [Color32; 4],
     picked_path: String,
     scale: f32,
-    instant_save: bool
+    instant_save: bool,
+    #[serde(skip)]
+    image: DynamicImage,
+    #[serde(skip)]
+    filter_type: FilterType
 }
 
 impl Default for TemplateApp {
@@ -44,7 +51,9 @@ impl Default for TemplateApp {
             palette: [Color32::WHITE, Color32::LIGHT_GRAY, Color32::DARK_GRAY, Color32::BLACK],
             picked_path: String::from("tiles.tl"),
             scale: 1.0,
-            instant_save: false
+            instant_save: false,
+            image: DynamicImage::default(),
+            filter_type: FilterType::Lanczos3
         }
     }
 }
@@ -298,6 +307,53 @@ impl eframe::App for TemplateApp {
                 }
 
                 ui.checkbox(&mut self.instant_save, "InstantSave");
+            });
+
+            ui.horizontal(|ui|{
+                let mut imported = false;
+                if ui.button("Import image").clicked()
+                {
+                    if let Some(path) = rfd::FileDialog::new().pick_file() {
+                        let img = match image::open(path)
+                        {
+                            Ok(file) => file,
+                            Err(err) =>
+                                {
+                                    // TODO log error
+                                    println!("load image: {}", err);
+                                    return;
+                                }
+                        };
+
+                        self.image = img;
+                        imported = true;
+                    }
+                };
+
+                ui.label(format!("w {w} h {h}", w=self.image.width(), h=self.image.height()));
+                if self.image.width() > 0 {
+                    let old = self.filter_type;
+                    let response = egui::ComboBox::from_label("FilterMode")
+                        .selected_text(format!("{:?}", self.filter_type))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.filter_type, FilterType::Nearest, "Nearest");
+                            ui.selectable_value(&mut self.filter_type, FilterType::Lanczos3, "Lanczos3");
+                            ui.selectable_value(&mut self.filter_type, FilterType::CatmullRom, "CatmullRom");
+                            ui.selectable_value(&mut self.filter_type, FilterType::Gaussian, "Gaussian");
+                            ui.selectable_value(&mut self.filter_type, FilterType::Triangle, "Triangle");
+                        });
+
+                    if old != self.filter_type || imported {
+                        let thumbnail = self.image.resize(self.width, self.height, self.filter_type).to_luma8();
+                        for y in 0..std::cmp::min( self.height, thumbnail.height() ) {
+                            for x in 0..std::cmp::min(self.width, thumbnail.width() ) {
+                                let color = thumbnail.get_pixel(x, y);
+                                let pallet_col = ((color[0] as u32 * self.palette.len() as u32) / 256);
+                                self.set(x, y, pallet_col as u8);
+                            }
+                        }
+                    }
+                }
             });
 
             ui.horizontal(|ui|{
