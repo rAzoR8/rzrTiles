@@ -114,6 +114,7 @@ impl TemplateApp {
         f.write(TL_MAGIC);
         f.write(TL_VERSION);
         f.write(&[self.mode as u8]);
+        // TODO: need to divide self.height by self.mode?
         let dims =[(self.width / 8) as u8, (self.height / 8) as u8];
         f.write(&dims);
         let data = pixels_to_gb_tiles(&self.pixels, self.width, self.height, self.mode);
@@ -135,6 +136,7 @@ impl TemplateApp {
 
         let mut f = BufReader::new( file );
 
+        // Header is 8 byte in size
         let mut magic: [u8;4] = [0,0,0,0];
         let mut version: [u8;1] = [0];
         let mut mode: [u8;1] = [0];
