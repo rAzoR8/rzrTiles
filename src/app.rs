@@ -376,13 +376,13 @@ impl eframe::App for TemplateApp {
             ui.add(egui::Slider::new(&mut self.scale, 0.0..=4.0).text("Scale"));
 
             let mut width = std::cmp::max(self.width.clone() / 8,1);
-            ui.add(egui::Slider::new(&mut width, 1..=8).text(format!("Width ({w})", w=self.width)));
+            ui.add(egui::Slider::new(&mut width, 1..=32).text(format!("Width ({w})", w=self.width)));
             width *= 8;
 
             let ystep = self.mode as u32;
 
             let mut height = std::cmp::max(self.height.clone() / ystep, 1);
-            ui.add(egui::Slider::new(&mut height, 1..=8).text(format!("Height ({h})", h=self.height)));
+            ui.add(egui::Slider::new(&mut height, 1..=32).text(format!("Height ({h})", h=self.height)));
             height *= ystep;
 
             // rescale
