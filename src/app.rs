@@ -19,6 +19,16 @@ pub enum TileMode
     Y16 = 16
 }
 
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum ResizeMode
+{
+    Default = 0,
+    Exact,
+    Fill,
+    Thumbnail,
+    ThumbnailExact
+}
+
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
@@ -38,7 +48,9 @@ pub struct TemplateApp {
     #[serde(skip)]
     image: DynamicImage,
     #[serde(skip)]
-    filter_type: FilterType
+    filter_type: FilterType,
+    #[serde(skip)]
+    resize_mode: ResizeMode
 }
 
 impl Default for TemplateApp {
@@ -53,7 +65,8 @@ impl Default for TemplateApp {
             scale: 1.0,
             instant_save: false,
             image: DynamicImage::default(),
-            filter_type: FilterType::Lanczos3
+            filter_type: FilterType::Lanczos3,
+            resize_mode: ResizeMode::Default
         }
     }
 }
@@ -313,7 +326,7 @@ impl eframe::App for TemplateApp {
 
             ui.horizontal(|ui|{
                 let mut imported = false;
-                if ui.button("Import image").clicked()
+                if ui.button("Import").clicked()
                 {
                     if let Some(path) = rfd::FileDialog::new().pick_file() {
                         let img = match image::open(path)
@@ -334,8 +347,8 @@ impl eframe::App for TemplateApp {
 
                 ui.label(format!("w {w} h {h}", w=self.image.width(), h=self.image.height()));
                 if self.image.width() > 0 {
-                    let old = self.filter_type;
-                    let response = egui::ComboBox::from_label("FilterMode")
+                    let old_filter = self.filter_type;
+                    egui::ComboBox::from_label("FilterMode")
                         .selected_text(format!("{:?}", self.filter_type))
                         .show_ui(ui, |ui| {
                             ui.selectable_value(&mut self.filter_type, FilterType::Nearest, "Nearest");
@@ -345,8 +358,26 @@ impl eframe::App for TemplateApp {
                             ui.selectable_value(&mut self.filter_type, FilterType::Triangle, "Triangle");
                         });
 
-                    if old != self.filter_type || imported {
-                        let thumbnail = self.image.resize(self.width, self.height, self.filter_type).to_luma8();
+                    let old_resize = self.resize_mode;
+                    egui::ComboBox::from_label("ResizeMode")
+                        .selected_text(format!("{:?}", self.resize_mode))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.resize_mode, ResizeMode::Default, "Default");
+                            ui.selectable_value(&mut self.resize_mode, ResizeMode::Exact, "Exact");
+                            ui.selectable_value(&mut self.resize_mode, ResizeMode::Fill, "Fill");
+                            ui.selectable_value(&mut self.resize_mode, ResizeMode::Thumbnail, "Thumbnail");
+                            ui.selectable_value(&mut self.resize_mode, ResizeMode::ThumbnailExact, "ThumbnailExact");
+                        });
+
+                    if old_filter != self.filter_type || old_resize != self.resize_mode || imported {
+                        let thumbnail = match self.resize_mode{
+                            ResizeMode::Default => self.image.resize(self.width, self.height, self.filter_type).to_luma8(),
+                            ResizeMode::Exact => self.image.resize_exact(self.width, self.height, self.filter_type).to_luma8(),
+                            ResizeMode::Fill => self.image.resize_to_fill(self.width, self.height, self.filter_type).to_luma8(),
+                            ResizeMode::Thumbnail => self.image.thumbnail(self.width, self.height).to_luma8(),
+                            ResizeMode::ThumbnailExact => self.image.thumbnail_exact(self.width, self.height).to_luma8(),
+                        };
+
                         for y in 0..std::cmp::min( self.height, thumbnail.height() ) {
                             for x in 0..std::cmp::min(self.width, thumbnail.width() ) {
                                 let color = thumbnail.get_pixel(x, y);
